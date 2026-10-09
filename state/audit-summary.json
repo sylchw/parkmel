@@ -1,0 +1,18 @@
+{
+  "checked": "2026-10-06",
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 5,
+    "critical": 0,
+    "total": 5
+  },
+  "entries": [
+    "@next/eslint-plugin-next",
+    "braces",
+    "eslint-config-next",
+    "fast-glob",
+    "micromatch"
+  ]
+}

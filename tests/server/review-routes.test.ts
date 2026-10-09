@@ -1,0 +1,20 @@
+import {beforeEach,it,expect,vi} from "vitest";
+import {NextRequest} from "next/server";
+import index from "../../public/carnegie-sections.json";
+const mock=vi.hoisted(()=>({session:vi.fn(),rpc:vi.fn()}));
+vi.mock("../../src/lib/server/auth",()=>({createRequestAuth:()=>({rpc:mock.rpc}),eligibilityAdapter:()=>({})}));
+vi.mock("../../src/lib/server/eligibility",async original=>({...await original<typeof import("../../src/lib/server/eligibility")>(),serverEligibility:mock.session}));
+import {POST as submit} from "../../src/app/api/annotations/route";
+import {POST as review} from "../../src/app/api/admin/reviews/route";
+const side=index.features[0];
+function payload(){const now=new Date().toISOString();return {schemaVersion:1,sectionId:side.id,geometryVersion:1,side:side.properties.side,startDescription:side.properties.startDescription,endDescription:side.properties.endDescription,allPanelsAndBoundariesChecked:true,panels:[{id:"panel",text:"2P",arrow:"both",ruleIds:["rule"]}],schedule:{schemaVersion:1,sectionId:side.id,geometryVersion:1,completeness:"complete",coverage:"full_schedule",verification:"unverified",confidenceLevel:1,lastVerifiedAt:null,changeState:"none",rules:[{id:"rule",type:"time_limit",maxDurationMinutes:120,periods:[{dayOfWeek:4,startTime:0,endTime:1440}],feeStatus:"free",permitCondition:"none",holidayPolicy:"applies",source:{type:"community",identifier:"test",evidenceKind:"street_view",observedAt:now,submittedAt:now,sourceDate:now.slice(0,10)}}]}};}
+const req=(body:unknown,origin="https://parkmel.test")=>new NextRequest("https://parkmel.test/api/annotations",{method:"POST",headers:{origin,"content-type":"application/json"},body:JSON.stringify(body)});
+beforeEach(()=>{vi.clearAllMocks();mock.session.mockResolvedValue({kind:"eligible",userId:"user"});mock.rpc.mockResolvedValue({data:"submission",error:null});});
+it("submits a complete Street View transcription for server review with registered side identity",async()=>{expect((await submit(req(payload()))).status).toBe(200);expect(mock.rpc.mock.calls[0][0]).toBe("submit_pilot_annotation");});
+it.each(["guest","unverified","suspended"])("denies %s submission",async kind=>{mock.session.mockResolvedValue({kind,userId:null});expect((await submit(req(payload()))).status).toBe(403);expect(mock.rpc).not.toHaveBeenCalled();});
+it("rejects forged geometry, verification and cross-origin submission",async()=>{const value=payload();value.side="unknown";expect((await submit(req(value))).status).toBe(400);const forged=payload();forged.schedule.verification="admin_verified";expect((await submit(req(forged))).status).toBe(400);expect((await submit(req(payload(),"https://evil.test"))).status).toBe(403);expect(mock.rpc).not.toHaveBeenCalled();});
+it("only allows server-verified admin review with optional notes",async()=>{expect((await review(req({id:side.id,decision:"approve",reason:"Checked signs"}))).status).toBe(403);mock.session.mockResolvedValue({kind:"admin",userId:"admin"});expect((await review(req({id:side.id,decision:"approve",reason:""}))).status).toBe(200);expect((await review(req({id:side.id,decision:"approve",reason:"Checked signs"}))).status).toBe(200);expect(mock.rpc.mock.calls[0][0]).toBe("review_pilot_annotation");});
+it("does not leak database failures",async()=>{mock.rpc.mockResolvedValue({data:null,error:{message:"database secret"}});const response=await submit(req(payload()));expect(response.status).toBe(503);expect(await response.text()).not.toContain("database secret");});
+
+it.each([undefined,"x","   "])("accepts optional admin note %s",async reason=>{mock.session.mockResolvedValue({kind:"admin"});expect((await review(req({id:side.id,decision:"reject",reason}))).status).toBe(200);expect(mock.rpc).toHaveBeenCalledWith("review_pilot_annotation",{submission:side.id,decision:"reject",reason:reason?.trim()??""});});
+it.each([null,42,"x".repeat(2001)])("rejects invalid notes",async reason=>{mock.session.mockResolvedValue({kind:"admin"});expect((await review(req({id:side.id,decision:"approve",reason}))).status).toBe(400);expect(mock.rpc).not.toHaveBeenCalled();});

@@ -1,0 +1,11 @@
+import {it,expect} from "vitest";
+import {evaluatedSections} from "../../src/lib/server/sections";
+import type {ParkingSchedule} from "../../src/domain/parking/types";
+import {canonicalPayload} from "../../src/domain/community/canonicalize";
+const now="2026-10-08T00:00:00Z",stay={arrival:now,departure:"2026-10-08T00:45:00Z"};
+const source={type:"community" as const,identifier:"test",evidenceKind:"field" as const,observedAt:now,submittedAt:now,sourceDate:null};
+function schedule():ParkingSchedule{return {schemaVersion:1,sectionId:"test",geometryVersion:1,completeness:"complete",coverage:"full_schedule",verification:"admin_verified",confidenceLevel:3,lastVerifiedAt:now,changeState:"none",rules:[{id:"general",type:"time_limit",maxDurationMinutes:120,periods:[{dayOfWeek:4,startTime:0,endTime:1440}],feeStatus:"free",permitCondition:"none",holidayPolicy:"applies",source},{id:"patch",type:"no_stopping",extent:{start:.1,end:.2},periods:[{dayOfWeek:4,startTime:0,endTime:1440}],feeStatus:"free",permitCondition:"none",holidayPolicy:"applies",source}]};}
+function evaluate(value:ParkingSchedule){return evaluatedSections({sections:[{sectionId:"test",geometryVersion:1,streetName:"Test street",side:"left",startDescription:"A",endDescription:"B",geometry:{type:"LineString",coordinates:[[145.056,-37.886],[145.056,-37.885]]},schedule:value}]},stay,now,true).sections[0];}
+it("keeps general 2P with an explicit red no-stopping patch",()=>{const result=evaluate(schedule());expect(result.parkingDisplay.category).toBe("medium");expect(result.localZones?.[0].parkingDisplay.category).toBe("prohibited");expect(result.localZones?.[0].geometry.coordinates).not.toEqual(result.geometry.coordinates);});
+it("never hides a full-side restriction or stale local evidence",()=>{const value=schedule();value.rules[1].extent={start:0,end:1};expect(evaluate(value).eligibility).toBe("unknown");value.rules[1].extent={start:.1,end:.2};value.rules[1].source={...source,observedAt:"2020-01-01T00:00:00Z"};expect(evaluate(value).parkingDisplay.category).toBe("unknown");expect(evaluate(value).localZones).toBeUndefined();});
+it("compares localized extents as part of community agreement",()=>{const a=schedule(),b=schedule();b.rules[1].extent={start:.3,end:.4};expect(canonicalPayload(a)).not.toBe(canonicalPayload(b));});

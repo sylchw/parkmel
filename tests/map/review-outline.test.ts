@@ -1,0 +1,4 @@
+import {it,expect} from 'vitest';
+import {reviewOutline} from '../../src/lib/map/review-outline';
+it('keeps boundaries within the preview and offsets the correct geographic side',()=>{const north=[[145,-38],[145,-37.999]],left=reviewOutline(north,'left'),right=reviewOutline(north,'right');expect(left.centre[0][1]).toBeGreaterThan(left.centre[1][1]);expect(left.edge[0][0]).toBeLessThan(left.centre[0][0]);expect(right.edge[0][0]).toBeGreaterThan(right.centre[0][0]);for(const p of [...left.centre,...left.edge,...right.edge]){expect(p[0]).toBeGreaterThan(0);expect(p[0]).toBeLessThan(380);expect(p[1]).toBeGreaterThan(0);expect(p[1]).toBeLessThan(220);}});
+it('preserves a bent road and rejects invalid geometry',()=>{expect(reviewOutline([[145,-38],[145.001,-38],[145.001,-37.999]],'left').centre).toHaveLength(3);expect(()=>reviewOutline([[NaN,-38]],'left')).toThrow();});
