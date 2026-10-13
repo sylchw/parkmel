@@ -1,0 +1,3 @@
+import {NextResponse,type NextRequest} from "next/server";
+import {createRequestAuth} from "../../../lib/server/auth";
+export async function POST(request:NextRequest){if(request.headers.get("origin")!==request.nextUrl.origin)return new NextResponse(null,{status:403});const response=NextResponse.redirect(new URL("/",request.url),303);response.headers.set("Cache-Control","private, no-store");try{const client=createRequestAuth(request,response);const {error}=await client.auth.signOut({scope:"local"});if(error)return new NextResponse("Sign out failed. Please try again.",{status:503});return response;}catch{return new NextResponse("Sign out unavailable",{status:503});}}

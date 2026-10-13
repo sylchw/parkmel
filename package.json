@@ -1,0 +1,51 @@
+{
+  "name": "parkmel",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:db": "node tests/db/run.mjs",
+    "test:e2e": "npm run build && node tests/browser/pilot.mjs && node tests/browser/cold-load.mjs",
+    "test": "npm run test:domain && npm run test:unit",
+    "test:domain": "node --experimental-strip-types --test tests/parking/validation.test.ts",
+    "prebuild": "node scripts/prepare-map-assets.mjs",
+    "predev": "node scripts/prepare-map-assets.mjs",
+    "db:apply": "node scripts/apply-hosted-migration.mjs"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
+    "date-fns": "4.1.0",
+    "date-fns-tz": "3.2.0",
+    "maplibre-gl": "6.12.0",
+    "next": "15.5.27",
+    "react": "19.0.4",
+    "react-dom": "19.0.4",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.2.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.19.21",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react": "6.1.2",
+    "esbuild": "0.27.3",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.27",
+    "typescript": "5.7.2",
+    "vitest": "4.1.11"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "overrides": {
+    "postcss": "8.5.29"
+  }
+}

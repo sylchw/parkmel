@@ -1,0 +1,27 @@
+import {spawn} from "node:child_process";
+import {readFileSync} from "node:fs";
+import assert from "node:assert/strict";
+export async function checkConcurrency({sql,context,container,database}){
+ if(context!=="colima-parkmel-tests"||container!=="parkmel-testdb"||!/^parkmel_check_\d+$/.test(database))throw Error("Local test database required");
+ const fixture=readFileSync("tests/db/accounts-reviewers.test.sql","utf8").split("UPDATE public.profile SET role='reviewer'")[0].replaceAll("test_payload","concurrency_payload").replace("CREATE TEMP TABLE","CREATE TABLE");
+ sql(fixture+"UPDATE public.profile SET role='admin' WHERE id='00000000-0000-0000-0000-000000000101'; COMMIT;");
+ const actor=i=>`00000000-0000-0000-0000-${String(i).padStart(12,"0")}`;
+ const session=(i,statement)=>`BEGIN;SET LOCAL ROLE authenticated;SELECT set_config('request.jwt.claim.sub','${actor(i)}',true);${statement};COMMIT;`;
+ const request=text=>new Promise((resolve,reject)=>{const child=spawn("docker",["--context",context,"exec","-i",container,"psql","-U","postgres","-d",database,"-v","ON_ERROR_STOP=1","-A","-t"],{stdio:["pipe","pipe","pipe"]});let out="",err="";child.stdout.on("data",value=>out+=value);child.stderr.on("data",value=>err+=value);child.on("error",reject);child.on("close",code=>resolve({code,out,err}));child.stdin.end(text);});
+ const direct="SELECT public.submit_and_approve_parking(p) FROM concurrency_payload;SELECT pg_sleep(.25)";
+ let results=await Promise.all([request(session(100,direct)),request(session(100,direct))]);
+ assert.ok(results.every(r=>r.code===0),"Same-account concurrent direct approval must succeed");
+ assert.equal(sql("SELECT count(*) FROM public.pilot_submission WHERE owner_id='"+actor(100)+"';").trim().split('\n').filter(x=>/^\s*1\s*$/.test(x)).length,1,"Concurrent retries create one entry");
+ sql(`CREATE TABLE concurrency_reviews AS SELECT public.submit_pilot_annotation(jsonb_set(p,'{schedule,rules,0,maxDurationMinutes}','60')) AS a,public.submit_pilot_annotation(jsonb_set(p,'{schedule,rules,0,maxDurationMinutes}','180')) AS b,(SELECT submission_id FROM public.pilot_publication WHERE section_id='00000000-0000-0000-0000-000000000200') AS revision FROM concurrency_payload;GRANT SELECT ON concurrency_reviews TO authenticated;` .replace('CREATE TABLE concurrency_reviews AS',`SELECT set_config('request.jwt.claim.sub','${actor(102)}',false);CREATE TABLE concurrency_reviews AS`));
+ results=await Promise.all([request(session(100,"SELECT public.review_pilot_annotation_current(a,'approve','',revision) FROM concurrency_reviews;SELECT pg_sleep(.25)")),request(session(101,"SELECT public.review_pilot_annotation_current(b,'approve','',revision) FROM concurrency_reviews"))]);
+ assert.equal(results.filter(r=>r.code===0).length,1,"Exactly one competing correction may publish from the same comparison");
+ assert.ok(results.find(r=>r.code!==0).err.includes("Published rules changed"),"Losing review requires fresh comparison");
+ const withdrawSetup=`SELECT set_config('request.jwt.claim.sub','${actor(103)}',false);CREATE TABLE concurrency_withdraw AS SELECT public.submit_pilot_annotation(jsonb_set(p,'{schedule,rules,0,maxDurationMinutes}','240')) AS id,(SELECT submission_id FROM public.pilot_publication WHERE section_id='00000000-0000-0000-0000-000000000200') AS revision FROM concurrency_payload;GRANT SELECT ON concurrency_withdraw TO authenticated;`;
+ sql(withdrawSetup);
+ results=await Promise.all([request(session(103,"SELECT public.withdraw_parking_submission(id) FROM concurrency_withdraw;SELECT pg_sleep(.25)")),request(session(100,"SELECT public.review_pilot_annotation_current(id,'approve','',revision) FROM concurrency_withdraw"))]);
+ assert.equal(results.filter(r=>r.code===0).length,1,"Approval and withdrawal cannot both succeed");
+ results=await Promise.all([request(session(100,`SELECT public.manage_profile_permissions('${actor(101)}','admin','suspended');SELECT pg_sleep(.25)`)),request(session(101,`SELECT public.manage_profile_permissions('${actor(100)}','admin','suspended')`))]);
+ assert.equal(results.filter(r=>r.code===0).length,1,"Competing admin suspensions must preserve an active admin");
+ sql("DO $$ BEGIN IF (SELECT count(*) FROM public.profile WHERE role='admin' AND eligibility='eligible')<>1 THEN RAISE EXCEPTION 'Lost active admins';END IF;END;$$;");
+ console.log("Concurrent authenticated requests: duplicate direct approval, competing corrections, withdrawal versus approval and admin suspensions passed");
+}
