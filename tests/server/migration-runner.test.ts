@@ -1,0 +1,10 @@
+import {it,expect} from 'vitest';
+import {spawnSync} from 'node:child_process';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const migration='015_optional_review_reason.sql';
+const run=(args:string[],env:Partial<NodeJS.ProcessEnv>={})=>spawnSync(process.execPath,['scripts/apply-hosted-migration.mjs',...args],{encoding:'utf8',env:{...process.env,PARKMEL_DATABASE_URL:'',...env}});
+it('previews without credentials or database execution',()=>{const result=run([migration]);expect(result.status).toBe(0);expect(result.stdout).toContain('Preview only');expect(result.stdout).toContain('SHA-256:');});
+it('rejects path traversal and missing connection settings',()=>{expect(run(['../015_optional_review_reason.sql']).status).toBe(1);expect(run([migration,'--apply']).status).toBe(1);});
+it('passes credentials through environment and SQL through stdin only',()=>{const dir=mkdtempSync(join(tmpdir(),'parkmel-psql-'));try{const binary=join(dir,'psql');writeFileSync(binary,`#!${process.execPath}\nlet sql='';process.stdin.on('data',d=>sql+=d);process.stdin.on('end',()=>console.log(JSON.stringify({args:process.argv.slice(2),host:process.env.PGHOST,tls:process.env.PGSSLMODE,passwordOK:process.env.PGPASSWORD==='fixture-password',urlRemoved:!process.env.PARKMEL_DATABASE_URL,sqlOK:sql.includes('CREATE OR REPLACE FUNCTION public.review_pilot_annotation')})));`,{mode:0o700});const result=run([migration,'--apply'],{PARKMEL_DATABASE_URL:'postgresql://postgres:fixture-password@db.example.test/postgres?sslmode=require',PARKMEL_PSQL_BIN:binary});expect(result.status).toBe(0);expect(result.stdout).not.toContain('fixture-password');expect(result.stdout).toContain('"passwordOK":true');expect(result.stdout).toContain('"urlRemoved":true');expect(result.stdout).toContain('"sqlOK":true');expect(result.stdout).toContain('"tls":"require"');}finally{rmSync(dir,{recursive:true,force:true});}});
