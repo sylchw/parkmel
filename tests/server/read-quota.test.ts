@@ -1,0 +1,5 @@
+import {it,expect,vi} from 'vitest';
+vi.mock('../../src/lib/server/sections',()=>({sectionService:()=>({rpc:vi.fn()})}));
+import {readBudget,quotaMessage,guestQuotaSubject} from '../../src/lib/server/read-quota';
+it('validates quota denial and provides an explicit retry rather than an empty map',()=>{const budget=readBudget({allowed:false,daily:false,retryAfter:30});expect(quotaMessage('map browsing',budget)).toContain('30 seconds');expect(quotaMessage('map browsing',{allowed:false,daily:true,retryAfter:3600})).toContain('midnight Melbourne');for(const value of [null,{allowed:false,retryAfter:0},{allowed:false,daily:true,retryAfter:-1}])expect(()=>readBudget(value)).toThrow();});
+it('keys guest limits from the trusted deployment IP without storing it',()=>{vi.stubEnv('VERCEL','1');vi.stubEnv('GUEST_SIGNING_SECRET','x'.repeat(32));const subject=guestQuotaSubject(new Headers({'x-forwarded-for':'192.0.2.5'}));expect(subject).toMatch(/^guest:[a-f0-9]{64}$/);expect(subject).not.toContain('192.0.2.5');expect(()=>guestQuotaSubject(new Headers({'x-forwarded-for':'spoof,192.0.2.5'}))).toThrow();vi.unstubAllEnvs();});
